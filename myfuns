@@ -1,0 +1,48 @@
+# Excel Formatings
+
+wb<-createWorkbook(type="xlsx")
+CellStyle(wb, dataFormat=NULL, alignment=NULL,
+          border=NULL, fill=NULL, font=NULL)
+
+# Define some cell styles
+#++++++++++++++++++++
+# Title and sub title styles
+TITLE_STYLE <- CellStyle(wb)+ Font(wb,  heightInPoints=16, 
+                                   color="blue", isBold=TRUE, underline=1)
+SUB_TITLE_STYLE <- CellStyle(wb) + 
+  Font(wb,  heightInPoints=14, 
+       isItalic=TRUE, isBold=TRUE,color="orange")
+
+SUB_TITLE_STYLE1 <- CellStyle(wb) + 
+  Font(wb,  heightInPoints=14, 
+       isItalic=TRUE, isBold=FALSE)
+# Styles for the data table row/column names
+TABLE_ROWNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE)
+TABLE_COLNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE) +
+  Alignment(wrapText=TRUE, horizontal="ALIGN_CENTER") +
+  Border(color="black", position=c("TOP", "BOTTOM"), 
+         pen=c("BORDER_THIN", "BORDER_THICK")) 
+
+#++++++++++++++++++++++++
+# Helper function to add titles
+#++++++++++++++++++++++++
+# - sheet : sheet object to contain the title
+# - rowIndex : numeric value indicating the row to 
+#contain the title
+# - title : the text to use as title
+# - titleStyle : style object to use for title
+xlsx.addTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
+  rows <-createRow(sheet,rowIndex=rowIndex)
+  sheetTitle <-createCell(rows, colIndex=colIndex)
+  setCellValue(sheetTitle[[1,1]], title)
+  setCellStyle(sheetTitle[[1,1]], titleStyle)
+
+}
+
+xlsx.appendTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
+  rows <-getRows(sheet)[rowIndex]
+  sheetTitle <-createCell(rows, colIndex=colIndex)
+  setCellValue(sheetTitle[[1,1]], title)
+  setCellStyle(sheetTitle[[1,1]], titleStyle)
+
+}
