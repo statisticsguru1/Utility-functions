@@ -1,27 +1,121 @@
-# Excel Formatings
+# My funs 
 
-wb<-createWorkbook(type="xlsx")
-CellStyle(wb, dataFormat=NULL, alignment=NULL,
-          border=NULL, fill=NULL, font=NULL)
+# For calculating returns
 
-# Define some cell styles
-#++++++++++++++++++++
-# Title and sub title styles
-TITLE_STYLE <- CellStyle(wb)+ Font(wb,  heightInPoints=16, 
-                                   color="blue", isBold=TRUE, underline=1)
-SUB_TITLE_STYLE <- CellStyle(wb) + 
-  Font(wb,  heightInPoints=14, 
-       isItalic=TRUE, isBold=TRUE,color="orange")
+returns<-function(price){
+  return<-c()
+  for(i in 2:(length(price))){
+    return[i]<-100*(price[i]-price[i-1])/price[i-1]
+  }
+  ifelse(is.nan(return)|!is.finite(return),NA,return)
+}
 
-SUB_TITLE_STYLE1 <- CellStyle(wb) + 
-  Font(wb,  heightInPoints=14, 
-       isItalic=TRUE, isBold=FALSE)
-# Styles for the data table row/column names
-TABLE_ROWNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE)
-TABLE_COLNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE) +
-  Alignment(wrapText=TRUE, horizontal="ALIGN_CENTER") +
-  Border(color="black", position=c("TOP", "BOTTOM"), 
-         pen=c("BORDER_THIN", "BORDER_THICK")) 
+# For getting returns
+
+get_return<-function(data){
+  data%>%
+    mutate(across(.cols =2:last_col(),.fns = returns))
+}
+
+# getting performance ranking 
+
+get_performance_rankings<-function(data){
+  data%>%
+    mutate(across(.cols =2:last_col(),.fns = returns))%>%
+    select(-1)%>%
+    colMeans(.,na.rm = T)%>%
+    data.frame()%>%
+    rename("average return"=".")%>%
+    rownames_to_column(var="Constituent")%>%
+    arrange(desc(abs(`average return`)))
+}
+
+# Function to compute percentage price oscillators 
+
+pp<-function(x,nFast = 3, nSlow = 6,nSig = 6,...){
+  macs=MACD(x, nFast = nFast, nSlow = nSlow, nSig = 6, maType="EMA", percent = TRUE,...)
+  macs[,1]
+}
+
+percentage_price_osc<-function(data,...){
+  data%>%
+    mutate(across(.cols=contains("Top"),.fns =~pp(.,...)))
+}
+
+
+# function to to do column averages
+
+average<-function(data){
+  data%>%
+    select(-1)%>%
+    summarise(across(.cols = everything(),.fns = ~mean(.,na.rm =T)))%>%
+    mutate_all( ~replace(., is.nan(.), NA))
+}
+
+# function to computing rolling averages
+
+moving_avg<-function(data,rolling_widow=6,...){
+  data%>%
+    slider::slide(average,.complete=T,.before=rolling_widow-1,...)%>%
+    bind_rows()%>%
+    mutate(Date=data$Date[-(1:(rolling_widow-1))])%>%
+    select(Date,1:(last_col()-1))%>%
+    mutate_all( ~replace(., is.nan(.), NA))
+}
+
+
+# Function to compute quintiles
+
+Topbottom<-function(data){
+  data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="Average price")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")),Date=as.Date(Date))%>%
+    group_by(series)%>%
+    mutate(quantile=ifelse(`Average price`>=quantile(`Average price`,na.rm=T)[4],"Top 25%",
+                           ifelse(`Average price`<=quantile(`Average price`,na.rm=T)[2],"Bottom 25%","middle50")),
+           Date=as.Date(Date))%>%
+    ungroup()%>%
+    filter(quantile!='middle50')}
+
+
+# Function to flatten correlation matrix 1
+
+flat1<-function(data){
+  data%>%
+    select(-1)%>%
+    correlate()%>%
+    shave()%>%
+    stretch()%>%
+    filter(complete.cases(.))%>%
+    mutate(label=paste(x,y,sep="-"))%>%
+    select(label,r)%>%
+    pivot_wider(names_from = "label",values_from=r)
+}
+
+
+# getting correlation based rankings 
+
+rankfun<-function(data){ 
+  data%>%
+    rowwise()%>%
+    mutate(total=sum(c_across(2:last_col()),na.rm=T))%>%
+    ungroup()%>%
+    select(-1)%>%
+    correlate()%>%
+    focus(term,total)%>%
+    arrange(desc(abs(total)))}
+
+# flattening function  2
+
+flat<-function(data){
+  data%>%
+    rowwise()%>%
+    mutate(total=sum(c_across(2:last_col()),na.rm=T))%>%
+    ungroup()%>%
+    select(-1)%>%
+    correlate()%>%
+    filter(term=="total")
+}
 
 #++++++++++++++++++++++++
 # Helper function to add titles
@@ -36,7 +130,7 @@ xlsx.addTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
   sheetTitle <-createCell(rows, colIndex=colIndex)
   setCellValue(sheetTitle[[1,1]], title)
   setCellStyle(sheetTitle[[1,1]], titleStyle)
-
+  
 }
 
 xlsx.appendTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
@@ -44,5 +138,15 @@ xlsx.appendTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
   sheetTitle <-createCell(rows, colIndex=colIndex)
   setCellValue(sheetTitle[[1,1]], title)
   setCellStyle(sheetTitle[[1,1]], titleStyle)
-
+  
 }
+
+
+xlsx.assert_create_orappend<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
+  if(is.null(getRows(sheet)[rowIndex][[1]])){
+    xlsx.addTitle(sheet=sheet, rowIndex=rowIndex,colIndex=colIndex, title=title, titleStyle=titleStyle)
+  }else{
+    xlsx.appendTitle(sheet=sheet, rowIndex=rowIndex,colIndex=colIndex, title=title, titleStyle=titleStyle)
+  }
+}
+
