@@ -1,0 +1,447 @@
+library(readxl)
+library(tidyquant)
+library(TTR)
+library(stringr)
+library(tidyverse)
+library(ggcorrplot)
+library(corrr)
+library(xlsx)
+library(devtools)
+
+
+source_url("https://raw.githubusercontent.com/kassambara/r2excel/master/R/r2excel.r")
+source_url("https://raw.githubusercontent.com/statisticsguru1/Additional-xlsx-functions/main/myfuns")
+
+
+#setwd("C:/Users/user/Documents/Corrapp")
+
+# get sheet names
+
+my_filepath<-"Data for Correlation Report October 2020 to Jan 22 across.xlsx"
+
+sheets<-excel_sheets(my_filepath)
+constituent_lists<-sheets[endsWith(sheets,"List")]
+
+asset_groups<-lapply(constituent_lists, read_excel, path =my_filepath,col_names = F)
+names(asset_groups)<-constituent_lists
+# read main data
+Data <- read_excel(my_filepath,sheet = "Data")%>%
+  setNames(str_squish(colnames(.)))%>%
+  select(`...1`,!starts_with("..."))%>%
+  rename(Date=`...1`)%>%
+  arrange(Date)
+
+# split it by asset group and save each asset group data separately(constituents data)
+
+asset_group_data<-list()
+for (asset_group in constituent_lists){
+  js<-asset_groups[[asset_group]]
+  asset_group_data[[asset_group]]<- Data%>%select(Date,js$`...1`)
+}
+
+
+#	Performance based correlations
+
+# Returns 
+all_returns<-asset_group_data%>%
+  map(get_return)
+
+
+# performance rankings
+
+performance_rankings<-asset_group_data%>%
+  map(get_performance_rankings)
+
+
+#####nfast and nslow To be varied, Tops x to be varied #############
+
+nFast = 3
+nSlow = 6
+
+
+Tops= c(3,6,9,12)
+
+#######################################################
+
+## average prices of to n constituents
+
+TPs<-list()
+for(dat in names(asset_group_data)){
+  data<-asset_group_data[[dat]]
+  rankings<-performance_rankings[[dat]]
+  
+  for(num in Tops){
+    data<-data%>%
+      rowwise()%>%
+      mutate(!!as.name(paste("Top_",num,sep="")):=mean(c_across(rankings$Constituent[1:num]),na.rm=T))
+  }
+  TPs[[dat]]<-data%>%select(Date,contains("Top"))%>%
+    mutate_all( ~replace(., is.nan(.), NA))%>%
+    as.tibble()%>%
+    ungroup()
+  
+}
+
+
+# percentage price oscillators 
+
+macds<-TPs%>%map(percentage_price_osc,nFast = nFast, nSlow = nFast)
+
+
+# Graphing price oscillators
+
+ppgraphs<-list()
+
+for(dat in names(macds)){
+  data<-macds[[dat]]
+  ppgraphs[[dat]]<-data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="macd")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")))%>%
+    mutate(pos=macd>=0,Date=as.Date(Date))%>%
+    ggplot(aes(x=Date, y=macd,fill=pos))+
+    geom_histogram(stat = 'identity')+
+    labs(title=paste(strsplit(dat," ")[[1]][1],"Constituents"),y = 'percentage price oscillator')+
+    theme_bw()+
+    theme(legend.position = 'None',axis.text.x = element_text(angle = 90))+
+    facet_wrap(~series)+
+    scale_x_date(date_breaks = "1 month")
+}
+
+
+
+# n- moving Averages for the top constituents
+
+########Rolling widow to be input #########
+
+roll<-9
+moving_avg_data<-TPs%>%map(moving_avg,rolling_widow=roll)
+
+#####
+
+
+# moving average graphs
+
+
+moving_avg_graphs<-list()
+for(dat in names(moving_avg_data)){
+  data<-moving_avg_data[[dat]]
+  
+  moving_avg_graphs[[dat]]<-data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="price")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")),Date=as.Date(Date))%>%
+    ggplot(aes(x=Date, y=price,colour=series))+
+    geom_line()+
+    labs(title =paste(strsplit(dat," ")[[1]][1],"Constituents"), y = paste(roll,'day price rolling average'))+
+    theme_bw()+
+    scale_x_date(date_breaks = "1 month")+
+    theme(axis.text.x = element_text(angle = 90))
+}
+
+
+
+# getting top and bottom quin tiles
+
+Topbottomquintiles_data<-moving_avg_data%>%map(Topbottom)
+
+
+Topbottomquintiles_graphs<-list()
+for(dat in names(Topbottomquintiles_data)){
+  data<-Topbottomquintiles_data[[dat]]
+  
+  Topbottomquintiles_graphs[[dat]]<-data%>%
+    ggplot(aes(x=Date,y=`Average price`,colour=quantile))+
+    geom_line()+
+    geom_point()+
+    theme_bw()+
+    labs(title =paste(strsplit(dat," ")[[1]][1],"Constituents"), y = paste(roll,'day price rolling average'))+
+    facet_wrap(~series)+
+    theme(legend.position = "bottom",axis.text.x = element_text(angle=90))+
+    scale_x_date(date_breaks = "1 month")}
+
+
+##### Correlation based graphs
+
+# correlation rankings
+
+corr_rankings<-asset_group_data%>%map(rankfun)
+
+
+average_corr<-list()
+for(dat in names(asset_group_data)){
+  data<-asset_group_data[[dat]]
+  dates<-data$Date
+  
+  data<-data%>%
+    slider::slide(flat,.before=roll-1,.complete=T)%>%
+    bind_rows()%>%
+    mutate_if(is.numeric,atanh)%>%
+    mutate_all(.funs = na_if,-Inf)%>%
+    mutate_all(.funs = na_if,Inf)
+  
+  rankings<- corr_rankings[[dat]]
+  
+  for(num in Tops){
+    data<-data%>%
+      rowwise()%>%
+      mutate(!!as.name(paste("Top_",num,sep="")):=mean(c_across(rankings$term[1:num]),na.rm=T))
+  }
+  
+  average_corr[[dat]]<-data%>%
+    ungroup()%>%
+    mutate(Date=dates[-(1:(roll-1))])%>%
+    select(Date,contains('Top_'))%>%
+    mutate_if(is.numeric,tanh)
+}
+
+
+average_corr_graphs<-list()
+for(dat in names(average_corr)){
+  data<-average_corr[[dat]]
+  
+  average_corr_graphs[[dat]]<-data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="Average correlation")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")))%>%
+    mutate(pos=`Average correlation`>=0,Date=as.Date(Date))%>%
+    ggplot(aes(x=Date, y=`Average correlation`,fill=pos))+
+    geom_bar(stat = 'identity')+
+    labs(title=paste(strsplit(dat," ")[[1]][1],"Constituents"), y = 'Average correlation')+
+    theme_bw()+
+    theme(legend.position = 'None',axis.text.x = element_text(angle=90))+
+    facet_wrap(~series)+
+    scale_x_date(date_breaks = "1 month")
+}
+
+
+# Average corr lines
+
+average_corr_graphs2<-list()
+
+for(dat in names(average_corr)){
+  data<-average_corr[[dat]]
+  
+  average_corr_graphs2[[dat]]<-data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="Average correlation")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")))%>%
+    mutate(pos=`Average correlation`>=0,Date=as.Date(Date))%>%
+    ggplot(aes(x=Date, y=`Average correlation`,colour=series))+
+    geom_line(stat = 'identity')+
+    labs(title=paste(strsplit(dat," ")[[1]][1],"Constituents"), y = 'Average correlation')+
+    theme_bw()+
+    theme(legend.position = "bottom",axis.text.x = element_text(angle=90))+
+    scale_x_date(date_breaks = "1 month")
+}
+
+
+# Top quantile correlations 
+
+average_corr_graphs3<-list()
+
+for(dat in names(average_corr)){
+  data<-average_corr[[dat]]
+  
+  average_corr_graphs3[[dat]]<-data%>%
+    pivot_longer(cols=contains("Top_"),names_to="series",values_to="Average correlation")%>%
+    mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")))%>%
+    group_by(series)%>%
+    mutate(quantile=ifelse(`Average correlation`>=quantile(`Average correlation`,na.rm=T)[4],"Top 25%",
+                           ifelse(`Average correlation`<=quantile(`Average correlation`,na.rm=T)[2],"Bottom 25%","middle50")),
+           Date=as.Date(Date))%>%
+    filter(quantile!='middle50')%>%
+    ggplot(aes(x=Date,y=`Average correlation`,colour=quantile))+
+    geom_line()+
+    geom_point()+
+    theme_bw()+
+    labs(title=paste(strsplit(dat," ")[[1]][1],"Constituents"),y=paste(roll,"day rolling average"))+
+    theme(legend.position = "bottom",axis.text.x = element_text(angle=90))+
+    facet_wrap(~series)+
+    scale_x_date(date_breaks = "1 month")
+}
+
+
+
+################################### Printing ##############################################################
+
+# Excel Formatings
+
+wb<-createWorkbook(type="xlsx")
+CellStyle(wb, dataFormat=NULL, alignment=NULL,
+          border=NULL, fill=NULL, font=NULL)
+
+# Define some cell styles
+#++++++++++++++++++++
+# Title and sub title styles
+TITLE_STYLE <- CellStyle(wb)+ Font(wb,  heightInPoints=16, 
+                                   color="blue", isBold=TRUE, underline=1)
+SUB_TITLE_STYLE <- CellStyle(wb) + 
+  Font(wb,  heightInPoints=14, 
+       isItalic=TRUE, isBold=TRUE,color="orange")
+
+SUB_TITLE_STYLE1 <- CellStyle(wb) + 
+  Font(wb,  heightInPoints=14, 
+       isItalic=TRUE, isBold=FALSE)
+# Styles for the data table row/column names
+TABLE_ROWNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE)
+TABLE_COLNAMES_STYLE <- CellStyle(wb) + Font(wb, isBold=TRUE) +
+  Alignment(wrapText=TRUE, horizontal="ALIGN_CENTER") +
+  Border(color="black", position=c("TOP", "BOTTOM"), 
+         pen=c("BORDER_THIN", "BORDER_THICK")) 
+
+#++++++++++++++++++++++++
+########################################################################################
+
+for(dat in names(asset_group_data)){
+  data<-asset_group_data[[dat]]
+  sheetname<-paste(strsplit(dat," ")[[1]][1],"Data",sep="_")
+  sheetlabel<-paste(strsplit(dat," ")[[1]][1],"Data")
+  
+  assign(sheetname,createSheet(wb, sheetName = paste(sheetlabel)))
+  
+# Add title
+xlsx.addTitle(get(sheetname), rowIndex=1, title=paste(sheetlabel),
+              titleStyle = TITLE_STYLE)
+# Add sub title
+xlsx.addTitle(get(sheetname), rowIndex=2, 
+              title=paste("Dataset for",strsplit(dat," ")[[1]][1],"constituents"),
+              titleStyle = SUB_TITLE_STYLE1)
+
+
+# Add a table
+addDataFrame(data,get(sheetname), startRow=3, startColumn=1, 
+             colnamesStyle = TABLE_COLNAMES_STYLE,
+             rownamesStyle = TABLE_ROWNAMES_STYLE)
+
+# Change column width
+setColumnWidth(get(sheetname), colIndex=c(1:ncol(data)), colWidth=11)
+setColumnWidth(get(sheetname), colIndex=2, colWidth=19)
+}
+
+
+for(dat in names(all_returns)){
+  data<-all_returns[[dat]]
+  
+  sheetname<-paste(strsplit(dat," ")[[1]][1],"returns",sep="_")
+  sheetlabel<-paste(strsplit(dat," ")[[1]][1],"returns")
+  
+  assign(sheetname,createSheet(wb, sheetName = paste(sheetlabel)))
+
+# Add title
+xlsx.addTitle(get(sheetname), rowIndex=1, title=paste(sheetlabel),
+              titleStyle = TITLE_STYLE)
+# Add sub title
+xlsx.addTitle(get(sheetname), rowIndex=2, 
+              title=paste("Calculated",strsplit(dat," ")[[1]][1], "daily percentage returns"),
+              titleStyle = SUB_TITLE_STYLE1)
+
+# Add a table
+addDataFrame(data, get(sheetname), startRow=3, startColumn=1, 
+             colnamesStyle = TABLE_COLNAMES_STYLE,
+             rownamesStyle = TABLE_ROWNAMES_STYLE)
+# Change column width
+setColumnWidth(get(sheetname), colIndex=c(1:ncol(data)), colWidth=11)
+setColumnWidth(get(sheetname), colIndex=2, colWidth=19)
+}
+
+
+
+# performance rankings
+
+Perfomance_based_rankings <- createSheet(wb, sheetName = "Perfomance based rankings")
+
+
+# Add title
+xlsx.addTitle(Perfomance_based_rankings, rowIndex=1, title="Perfomance based rankings",
+              titleStyle = TITLE_STYLE)
+
+for(dat in names(performance_rankings)){
+  data<-performance_rankings[[dat]]
+  posit<-which(names(performance_rankings)==dat)
+  colu<-c(1,seq(5,(5*length(names(performance_rankings))-1),5))
+  
+# Add sub title
+  
+  xlsx.assert_create_orappend(Perfomance_based_rankings, rowIndex=2, colIndex =  colu[posit],
+              title=paste(strsplit(dat," ")[[1]][1],"group"),
+              titleStyle = SUB_TITLE_STYLE1)
+
+# Add a table
+addDataFrame(data, Perfomance_based_rankings, startRow=3, startColumn=colu[posit], 
+             colnamesStyle = TABLE_COLNAMES_STYLE,
+             rownamesStyle = TABLE_ROWNAMES_STYLE)
+
+}
+
+# performance based graphs
+
+Perfomance_based_graphs <- createSheet(wb, sheetName = "Perfomance based graphs")
+
+
+# Add title
+xlsx.addTitle(Perfomance_based_graphs, rowIndex=1, title="Percentage price oscillators",
+              titleStyle = TITLE_STYLE)
+# Add sub title
+xlsx.addTitle(Perfomance_based_graphs, rowIndex=2, 
+              title="percentage price oscillators calculated as:",
+              titleStyle = SUB_TITLE_STYLE)
+# Add sub title
+xlsx.addTitle(Perfomance_based_graphs, rowIndex=3, 
+              title=paste("100*(EMA",nFast," - EMA",nSlow,")/EMA",nSlow,sep=""),
+              titleStyle = SUB_TITLE_STYLE)
+# Add sub title
+xlsx.addTitle(Perfomance_based_graphs, rowIndex=4, 
+              title= paste("where",paste("EMA",nFast,sep=""),"and",paste("EMA",nSlow,sep=""),"are",nFast,"day",
+                           "and",nSlow,"day","exponential moving averages"),
+              titleStyle = SUB_TITLE_STYLE)
+
+
+
+for(dat in names(macds)){
+  data<-macds[[dat]]
+  graph<-ppgraphs[[dat]]
+  posit<-which(names(macds)==dat)
+  colu<-c(1,seq(17,(17*length(names(macds))-1),17))
+  startrow<-6
+  
+  xlsx.assert_create_orappend(Perfomance_based_graphs, rowIndex=startrow, colIndex =  colu[posit],
+                              title=paste(strsplit(dat," ")[[1]][1],"group"),
+                              titleStyle = SUB_TITLE_STYLE1)
+  
+  addDataFrame(data,Perfomance_based_graphs, startRow=7, startColumn=colu[posit], 
+               colnamesStyle = TABLE_COLNAMES_STYLE,
+               rownamesStyle = TABLE_ROWNAMES_STYLE)
+  
+  # add graph
+  
+  ggsave(paste(dat,".png",sep=""),plot=graph,device = "png",height=6,width=6)
+  addPicture(paste(dat,".png",sep=""), Perfomance_based_graphs, scale = 1, startRow = startrow+2,
+             startColumn = (colu[posit])+7)
+  unlink(paste(dat,".png",sep=""))
+  
+endrow<- startrow+3+nrow(data)
+}
+
+for(dat in names(macds)){
+  data<-macds[[dat]]
+  graph<-ppgraphs[[dat]]
+  posit<-which(names(macds)==dat)
+  colu<-c(1,seq(17,(17*length(names(macds))-1),17))
+  
+  xlsx.assert_create_orappend(Perfomance_based_graphs, rowIndex=6, colIndex =  colu[posit],
+                              title=paste(strsplit(dat," ")[[1]][1],"group"),
+                              titleStyle = SUB_TITLE_STYLE1)
+  
+  addDataFrame(data,Perfomance_based_graphs, startRow=7, startColumn=colu[posit], 
+               colnamesStyle = TABLE_COLNAMES_STYLE,
+               rownamesStyle = TABLE_ROWNAMES_STYLE)
+  
+  # add graph
+  
+  ggsave(paste(dat,".png",sep=""),plot=graph,device = "png",height=6,width=6)
+  addPicture(paste(dat,".png",sep=""), Perfomance_based_graphs, scale = 1, startRow = 8,
+             startColumn = (colu[posit])+7)
+  unlink(paste(dat,".png",sep=""))
+  
+}
+
+
+saveWorkbook(wb, "Correlations.xlsx")
+
