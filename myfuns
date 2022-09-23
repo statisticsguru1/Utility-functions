@@ -32,14 +32,9 @@ get_performance_rankings<-function(data){
 
 # Function to compute percentage price oscillators 
 
-pp<-function(x,nFast = 3, nSlow = 6,nSig = 6,...){
-  macs=MACD(x, nFast = nFast, nSlow = nSlow, nSig = 6, maType="EMA", percent = TRUE,...)
+pp<-function(x,nFast = 3, nSlow = 6,nSig = 6, maType="EMA", percent = TRUE,...){
+  macs=MACD(x=x, nFast = nFast, nSlow = nSlow, nSig = nSig, maType=maType, percent = percent,...)
   macs[,1]
-}
-
-percentage_price_osc<-function(data,...){
-  data%>%
-    mutate(across(.cols=contains("Top"),.fns =~pp(.,...)))
 }
 
 
@@ -66,7 +61,7 @@ moving_avg<-function(data,rolling_widow=6,...){
 
 # Function to compute quintiles
 
-Topbottom<-function(data){
+Topbottom<-function(data,Tops=c(3,6)){
   data%>%
     pivot_longer(cols=contains("Top_"),names_to="series",values_to="Average price")%>%
     mutate(series=fct_relevel(series,paste("Top_",Tops,sep="")),Date=as.Date(Date))%>%
@@ -144,9 +139,12 @@ xlsx.appendTitle<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
 
 xlsx.assert_create_orappend<-function(sheet, rowIndex,colIndex=1, title, titleStyle){
   if(is.null(getRows(sheet)[rowIndex][[1]])){
-    xlsx.addTitle(sheet=sheet, rowIndex=rowIndex,colIndex=colIndex, title=title, titleStyle=titleStyle)
+    rows <-createRow(sheet,rowIndex=rowIndex)
   }else{
-    xlsx.appendTitle(sheet=sheet, rowIndex=rowIndex,colIndex=colIndex, title=title, titleStyle=titleStyle)
+    rows <-getRows(sheet)[rowIndex]
   }
+  sheetTitle <-createCell(rows, colIndex=colIndex)
+  setCellValue(sheetTitle[[1,1]], title)
+  setCellStyle(sheetTitle[[1,1]], titleStyle)
+  
 }
-
