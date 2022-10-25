@@ -1,6 +1,5 @@
 ## Title style
 TITLE_STYLE <- createStyle(
-  fontName = = "Arial",
   fontSize = 16,
   fontColour = "blue",
   numFmt = openxlsx_getOp("numFmt", "GENERAL"),
@@ -23,7 +22,6 @@ TITLE_STYLE <- createStyle(
 # subtittle style
 
 SUB_TITLE_STYLE <- createStyle(
-  fontName = = "Arial",
   fontSize = 14,
   fontColour = "orange",
   numFmt = openxlsx_getOp("numFmt", "GENERAL"),
@@ -43,7 +41,6 @@ SUB_TITLE_STYLE <- createStyle(
 )
 
 SUB_TITLE_STYLE1 <- createStyle(
-  fontName = = "Arial",
   fontSize = 14,
   fontColour = "black",
   numFmt = openxlsx_getOp("numFmt", "GENERAL"),
@@ -62,24 +59,4 @@ SUB_TITLE_STYLE1 <- createStyle(
   hidden = NULL
 )
 
-
-SUB_TITLE_STYLE1 <- createStyle(
-  fontName = "Arial",
-  fontSize = 14,
-  fontColour = "black",
-  numFmt = openxlsx_getOp("numFmt", "GENERAL"),
-  border = NULL,
-  borderColour = openxlsx_getOp("borderColour", "black"),
-  borderStyle = openxlsx_getOp("borderStyle", "thin"),
-  bgFill = NULL,
-  fgFill = NULL,
-  halign = NULL,
-  valign = NULL,
-  textDecoration =c("italic"),
-  wrapText = FALSE,
-  textRotation = NULL,
-  indent = NULL,
-  locked = NULL,
-  hidden = NULL
-)
 
